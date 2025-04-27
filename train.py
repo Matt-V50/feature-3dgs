@@ -10,10 +10,14 @@
 #
 
 import os
+from typing import List
+import numpy as np
 import torch
 from random import randint
+from scene.cameras import Camera
 from utils.loss_utils import l1_loss, ssim, tv_loss 
-from gaussian_renderer import render, network_gui
+# from gaussian_renderer import render, network_gui
+from gaussian_renderer import gsplat_render as render, network_gui
 import sys
 from scene import Scene, GaussianModel
 from utils.general_utils import safe_state
@@ -34,21 +38,23 @@ from models.semantic_dataloader import VariableSizeDataset
 from torch.utils.data import DataLoader
 
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
+    viewpoint_stack_index: List[int] = None
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
     scene = Scene(dataset, gaussians)
 
     # 2D semantic feature map CNN decoder
-    viewpoint_stack = scene.getTrainCameras().copy()
-    viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
-    gt_feature_map = viewpoint_cam.semantic_feature.cuda()
-    feature_out_dim = gt_feature_map.shape[0]
+    # viewpoint_stack = scene.getTrainCameras().copy()
+    # viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
+    # gt_feature_map = viewpoint_cam.semantic_feature.cuda()
+    # feature_out_dim = gt_feature_map.shape[0]
+    feature_out_dim = scene.semantic_feature_dim
 
     
     # speed up
     if dataset.speedup:
-        feature_in_dim = int(feature_out_dim/4)
+        feature_in_dim = int(feature_out_dim/dataset.speedup_factor)
         cnn_decoder = CNN_decoder(feature_in_dim, feature_out_dim)
         cnn_decoder_optimizer = torch.optim.Adam(cnn_decoder.parameters(), lr=0.0001)
 
@@ -64,11 +70,13 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     iter_start = torch.cuda.Event(enable_timing = True)
     iter_end = torch.cuda.Event(enable_timing = True)
 
-    viewpoint_stack = None
+    # viewpoint_stack = None
     ema_loss_for_log = 0.0
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
 
+    train_cameras = scene.getTrainCameras()
+    viewpoint_count = len(train_cameras)
 
     for iteration in range(first_iter, opt.iterations + 1):
 
@@ -81,9 +89,16 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             gaussians.oneupSHdegree()
 
         # Pick a random Camera
-        if not viewpoint_stack:
-            viewpoint_stack = scene.getTrainCameras().copy()
-        viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
+        # if not viewpoint_stack:
+        #     viewpoint_stack = scene.getTrainCameras().copy()
+        # viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
+        
+        if not viewpoint_stack_index:
+            #shufffle the camera index
+            viewpoint_stack_index = list(range(viewpoint_count))
+            np.random.shuffle(viewpoint_stack_index)
+        viewpoint_cam_index = viewpoint_stack_index.pop(0)
+        viewpoint_cam: Camera = train_cameras[viewpoint_cam_index]
 
         # Render
         if (iteration - 1) == debug_from:
@@ -130,7 +145,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             if iteration < opt.densify_until_iter:
                 # Keep track of max radii in image-space for pruning
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
-                gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
+                # gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
+                gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter, image.shape[2], image.shape[1])
 
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None

@@ -13,6 +13,7 @@ from scene.cameras import Camera
 import numpy as np
 from utils.general_utils import PILtoTorch
 from utils.graphics_utils import fov2focal
+from scene.dataset_readers.utils import CameraInfo
 
 WARNED = False
 
@@ -64,13 +65,30 @@ def loadCam(args, id, cam_info, resolution_scale):
 
 
 
-def cameraList_from_camInfos(cam_infos, resolution_scale, args):
-    camera_list = []
 
-    for id, c in enumerate(cam_infos):
-        camera_list.append(loadCam(args, id, c, resolution_scale))
 
-    return camera_list
+def cameraList_from_camInfos(cam_infos: CameraInfo, resolution_scale, args):
+    class Wapper:
+        def __init__(self, cam_infos: CameraInfo, resolution_scale, args):
+            self.args = args
+            self.cam_infos = cam_infos
+            self.resolution_scale = resolution_scale
+        
+        def __getitem__(self, index):
+            return loadCam(self.args, index, self.cam_infos[index], self.resolution_scale)
+    
+        def __len__(self):
+            return len(self.cam_infos)
+        
+    return Wapper(cam_infos, resolution_scale, args)
+
+# def cameraList_from_camInfos(cam_infos, resolution_scale, args):
+#     camera_list = []
+
+#     for id, c in enumerate(cam_infos):
+#         camera_list.append(loadCam(args, id, c, resolution_scale))
+
+#     return camera_list
 
 def camera_to_JSON(id, camera : Camera):
     Rt = np.zeros((4, 4))

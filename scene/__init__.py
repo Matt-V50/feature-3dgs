@@ -12,6 +12,7 @@
 import os
 import random
 import json
+from scene.dataset_readers.utils import SceneInfo
 from utils.system_utils import searchForMaxIteration
 from scene.dataset_readers import sceneLoadTypeCallbacks
 from scene.gaussian_model import GaussianModel
@@ -39,14 +40,22 @@ class Scene:
 
         self.train_cameras = {}
         self.test_cameras = {}
+        self.semantic_feature_dim = None
 
+        scene_info: SceneInfo = None
         if os.path.exists(os.path.join(args.source_path, "sparse")):
             scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.foundation_model, args.images, args.eval) 
+        elif os.path.exists(os.path.join(args.source_path, "transforms_gsbb.json")):
+            print("Found transforms_gsbb.json file, assuming GSBB data set!")
+            scene_info = sceneLoadTypeCallbacks["GSBB"](args.source_path, args.foundation_model, 
+                                                        eval=args.eval)
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             print("Found transforms_train.json file, assuming Blender data set!")
             scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path,  args.foundation_model, args.white_background, args.eval) 
         else:
             assert False, "Could not recognize scene type!"
+            
+        self.semantic_feature_dim = scene_info.semantic_feature_dim
 
         if not self.loaded_iter:
             with open(scene_info.ply_path, 'rb') as src_file, open(os.path.join(self.model_path, "input.ply") , 'wb') as dest_file:
@@ -80,7 +89,7 @@ class Scene:
                                                            "iteration_" + str(self.loaded_iter),
                                                            "point_cloud.ply"))
         else:
-            self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent, scene_info.semantic_feature_dim, args.speedup) 
+            self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent, scene_info.semantic_feature_dim, args.speedup, args.speedup_factor) 
 
     def save(self, iteration):
         point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))

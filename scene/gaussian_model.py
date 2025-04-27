@@ -130,7 +130,7 @@ class GaussianModel:
         if self.active_sh_degree < self.max_sh_degree:
             self.active_sh_degree += 1
 
-    def create_from_pcd(self, pcd : BasicPointCloud, spatial_lr_scale : float, semantic_feature_size : int, speedup: bool):
+    def create_from_pcd(self, pcd : BasicPointCloud, spatial_lr_scale : float, semantic_feature_size : int, speedup: bool, speedup_factor: int = 4):
         self.spatial_lr_scale = spatial_lr_scale
         fused_point_cloud = torch.tensor(np.asarray(pcd.points)).float().cuda()
         fused_color = RGB2SH(torch.tensor(np.asarray(pcd.colors)).float().cuda())
@@ -139,7 +139,7 @@ class GaussianModel:
         features[:, 3:, 1:] = 0.0
         
         if speedup: # speed up for Segmentation
-            semantic_feature_size = int(semantic_feature_size/4)
+            semantic_feature_size = int(semantic_feature_size/speedup_factor)
         self._semantic_feature = torch.zeros(fused_point_cloud.shape[0], semantic_feature_size, 1).float().cuda() 
         print("Number of points at initialisation : ", fused_point_cloud.shape[0])
 
@@ -433,6 +433,13 @@ class GaussianModel:
 
         torch.cuda.empty_cache()
 
-    def add_densification_stats(self, viewspace_point_tensor, update_filter):
-        self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
-        self.denom[update_filter] += 1
+    # def add_densification_stats(self, viewspace_point_tensor, update_filter):
+    #     self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
+    #     self.denom[update_filter] += 1
+        
+    def add_densification_stats(self, viewspace_point_tensor, update_filter, width, height):
+        grad = viewspace_point_tensor.grad[update_filter,:2]
+        # Normalize the gradient to [-1, 1] screen size
+        grad[:, 0] *= width * 0.5
+        grad[:, 1] *= height * 0.5
+        self.xyz_gradient_accum[update_filter] += torch.norm(grad, dim=-1, keepdim=True)

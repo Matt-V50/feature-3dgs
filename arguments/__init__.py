@@ -56,6 +56,7 @@ class ModelParams(ParamGroup):
         self.data_device = "cuda"
         self.eval = False
         self.speedup = False ###
+        self.speedup_factor = 4
         self.render_items = ['RGB', 'Depth', 'Edge', 'Normal', 'Curvature', 'Feature Map']
         super().__init__(parser, "Loading Parameters", sentinel)
 
